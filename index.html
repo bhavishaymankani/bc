@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moralis Gas Stats</title>
+    <script src="https://cdn.jsdelivr.net/npm/web3@latest/dist/web3.min.js"></script>
+    <script src="https://unpkg.com/moralis/dist/moralis.js"></script>
+</head>
+<body>
+    <h1>Moralis Gas Stats</h1>
+    <button id="btn-login">Moralis Login</button>
+    <button id="btn-logout">Logout</button>
+    <button id="btn-get-stats">Refresh Stats</button>
+    <!-- Stats will go here -->
+    <ul id="gas-stats"></ul>
+
+    <script>
+        // Connect to Moralis server
+        const serverUrl = "https://gjgjzccgef6d.usemoralis.com:2053/server";
+        const appId = "8IqxNy07hfIUf9lc3P27wEPcup6uaIj592FKIu1D";
+        Moralis.start({ serverUrl, appId });
+
+        // LOG IN WITH METAMASK
+        async function login() {
+            let user = Moralis.User.current();
+            if (!user) {
+                user = await Moralis.authenticate();
+            }
+            console.log("Logged in user:", user);
+            getStats();
+        }
+
+        // LOG OUT
+        async function logOut() {
+            await Moralis.User.logOut();
+            console.log("Logged out");
+        }
+
+        // Bind button click handlers
+        document.getElementById("btn-login").onclick = login;
+        document.getElementById("btn-logout").onclick = logOut;
+        document.getElementById("btn-get-stats").onclick = getStats;
+
+        // Refresh stats function
+        async function getStats() {
+            const user = Moralis.User.current();
+            if (user) {
+                await getUserTransactions(user);
+            }
+            await getAverageGasPrices();
+        }
+
+        // HISTORICAL TRANSACTIONS
+        async function getUserTransactions(user) {
+            // Create query
+            const query = new Moralis.Query("EthTransactions");
+            query.equalTo("from_address", user.get("ethAddress"));
+
+            // Subscribe to query updates
+            const subscription = await query.subscribe();
+            handleNewTransaction(subscription);
+
+            // Run query
+            const results = await query.find();
+            console.log("User transactions:", results);
+        }
+
+        // REAL-TIME TRANSACTIONS
+        async function handleNewTransaction(subscription) {
+            // Log each new transaction
+            subscription.on("create", function (data) {
+                console.log("New transaction:", data);
+            });
+        }
+
+        // CLOUD FUNCTION
+        async function getAverageGasPrices() {
+            const results = await Moralis.Cloud.run("getAvgGas");
+            console.log("Average user gas prices:", results);
+            renderGasStats(results);
+        }
+
+        function renderGasStats(data) {
+            const container = document.getElementById("gas-stats");
+            container.innerHTML = data
+                .map(function (row, rank) {
+                    return `<li>#${rank + 1}: ${Math.round(row.avgGas)} gwei</li>`;
+                })
+                .join("");
+        }
+
+        // Get stats on page load
+        getStats();
+        Moralis.Cloud.define("getAvgGas", async function (request) {
+    // Create a query for the "EthTransactions" class
+    const query = new Moralis.Query("EthTransactions");
+
+    // Define the aggregation pipeline
+    const pipeline = [
+        {
+            $group: {
+                _id: "$from_address", // Group by "from_address"
+                avgGas: {
+                    $avg: {
+                        $divide: ["$gas_price", 1000000000] // Convert wei to gwei
+                    }
+                }
+            }
+        },
+        {
+            $sort: { avgGas: -1 } // Sort by avgGas in descending order
+        },
+        {
+            $limit: 10 // Limit results to the top 10
+        }
+    ];
+
+    // Run the aggregation pipeline with master key
+    const results = await query.aggregate(pipeline, { useMasterKey: true });
+
+    return results;
+});
+
+    </script>
+</body>
+</html>
